@@ -1,0 +1,69 @@
+\section*{Variadics and Parameter Packs}
+
+Template variadics are used to describe a non-determined amount of template parameters\footnote{They shall not be confused with c variadics which are not evaluated at compile-time}.
+\begin{minted}{c++}
+template <typename ...Args>
+struct pack_holder {};
+
+template struct pack_holder<int, float, char>; // 3 template arguments
+template struct pack_holder<double, std::string>; // 2 template arguments
+\end{minted}
+
+\mintinline{c++}|Args| is a template parameter pack, i.e., a sequence of template parameters that accepts  zero or more template arguments. A variadic is a template definition with a parameter pack. \\
+
+The specification allows two kind of operations that can be applied to packs, named respectively : pack expansion and fold expressions.
+Pack expansion is the ability to repeat an expression for each pack's element.
+
+\newpage
+
+For example :
+\begin{paracol}{2}
+\begin{minted}{c++}
+template <typename ...Args>
+void foo(Args ...args) { ... }
+
+template <typename T>
+void bar(T t) { ... }
+
+template <typename ...Args>
+void f1(Args ...args) { foo(args...); }
+
+template <typename ...Args>
+void f2(Args ...args) { foo(bar(args)...); }
+\end{minted}
+
+\switchcolumn
+
+\vspace{20pt}
+
+\begin{itemize}
+    \item \mintinline{c++}|f1(1, 2, "foo");| 
+        expands to \mintinline{c++}|foo(1, 2, "foo");|
+    \item \mintinline{c++}|f2(1, 2, "foo");| 
+        
+        expands to \mintinline{c++}|foo(bar(1), bar(2), bar("foo"));|
+\end{itemize}
+
+\end{paracol}
+
+As for fold expression, they are used in order to reduce a parameter pack over a binary operator:
+\begin{minted}{c++}
+template <typename ...Args>
+    requires (std::same_as<bool, Args> && ...)
+constexpr bool all(Args ...args) { return (args && ...); }
+
+// folded into true && (true && (true && true))
+static_assert(all(true, true, true, true) == true); 
+
+// folded into true && (true && (false && true))
+static_assert(all(true, true, true, false, true) == false); 
+\end{minted}
+
+The fold-operator precedence is defined by the position of the fold expression ; namely
+they are four possible alternatives :
+\begin{minted}{c++}
+(expr op ...)           // → left to right
+(... op expr)           // → right to left
+(expt op ... op expr)   // → 
+\end{minted}
+

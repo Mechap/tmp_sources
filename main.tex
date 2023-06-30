@@ -1,0 +1,80 @@
+\documentclass[8pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[x11names]{xcolor}
+\usepackage[textwidth = 16cm]{geometry}
+
+\usepackage{verbatim}
+\usepackage{fancyvrb}
+
+\usepackage{listings}
+\newcommand\mpstyle{\lstset{
+language=Metapost, basicstyle=\ttfamily,
+frame=none, columns=fullflexible,
+keepspaces=true, showstringspaces=false}}
+\lstnewenvironment{code}[1][]{\mpstyle\lstset{#1}}{}
+
+\usepackage{minted}
+\usemintedstyle{gruvbox-light}
+%\usemintedstyle{bw}
+
+\usepackage{comment}
+\usepackage{csquotes}
+
+\usepackage{unicode-math}
+\setmainfont{LinLibertine_Rah.ttf}[Ligatures={Common,Rare,Historic,TeX}, Numbers=OldStyle]
+\setmathfont{LibertinusMath-Regular.otf}
+%\setmonofont{JetbrainsMono-Regular.ttf}
+
+
+\setlength\parindent{0pt}
+\setlength{\columnsep}{0.5cm}
+
+\usepackage{amsmath, amsfonts}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE,RO]{Simon Gregoire} \fancyhead[RE,LO]{C++ Template Metaprogramming}
+\fancyfoot[CE,CO]{\leftmark}
+\fancyfoot[LE,RO]{\thepage}
+
+\usepackage{sectsty}
+\sectionfont{\fontsize{12}{15}\selectfont}
+
+\usepackage{graphicx}
+\usepackage{luamplib}
+
+\usepackage{import}
+
+\usepackage[english]{babel}
+\usepackage{paracol}
+
+\title{\huge C++ Template Metaprogramming}
+\author{Simon Gregoire}
+
+\begin{document}
+	\begin{titlepage}
+	\maketitle
+	\begin{center}
+        \mplibforcehmode
+        \mplibtextextlabel{enable}
+        \begin{mplibcode}
+            input main1.mp;
+        \end{mplibcode}
+	\end{center}
+
+	\newpage
+
+	\import{../}{intro}
+
+	\end{titlepage}
+
+	\import{../}{basics}
+	\import{../}{factorial}
+	\import{../}{constant_expression.tex}
+	\import{../}{template.tex}
+	\import{../}{sfinae.tex}
+	\import{../}{variadic.tex}
+	\import{../}{type_deduction.tex}
+    %\import{../}{tmp_tricks.tex}
+	\import{../}{stateful.tex}
+\end{document}

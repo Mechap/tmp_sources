@@ -1,0 +1,63 @@
+\section*{Basics}
+
+A C++ program is basically a sequence of text files (typically header files and source files) that contain C++ code. Indeed, the C++ compilation model is based on the one originally used in the C language, though it changed a bit in C++20 with the introduction of modules. This compilation and execution model can be synthesized with the following diagram : \\
+
+\def\tll#1{$\vcenter{\let\\\cr\halign{\hss\textsf{##}\hss\cr#1\cr}}$}
+
+\begin{center}
+    \mplibforcehmode
+    \mplibtextextlabel{enable}
+    \begin{mplibcode}
+        input main2.mp;
+    \end{mplibcode}
+\end{center}
+
+An identifier is an arbitrary long sequence of text, and is used to identify objects with names.
+\vspace{10pt}
+
+Header files typically contain declarations of names, which introduce and describe the semantical properties of these names. As for source files, they contain definitions, i.e., declarations that define the introduced names.
+\vspace{10pt}
+
+For instance :
+
+\begin{minted}{c++}
+int f(); // declaration
+
+int f() { ... } // definition
+\end{minted}
+
+Source files typically contain definitions of names and are said to be translation units. A C++ program is required to have a function named \mintinline{c++}|main| defined in a translation unit. One interesting property of definitions is that no translation units shall contain more than one definition of a name where as we can use as many several declarations as we want.  In the C++ jargon, this property is called the ODR (which stands for One Definition Rule) and is fundamental for every systems that are said to be coherent.
+
+In order to use a name in a translation unit, we must provide at least one declaration of the said name and a single definition in a translation unit that may not be the same as the one in which we firstly used the said name. Please note that the definition is also by definition a declaration. \\
+
+After compiling every source files into object files, the compiler will use a program called a \textit{linker} which as its name would suggest is responsible for linking every object files together in order to make an actual executable program. Precisely, the linker tries to find a declaration for every ODR-uses calls to a name, i.e., contexts where a definition is required.
+
+\newpage
+
+For example :
+
+\begin{paracol}{2}
+\begin{minted}{c++}
+// square.h
+int square(int x); // declaration
+
+// square.cpp
+int square(int x) { // definition
+    return x * x;
+}
+
+// main.cpp
+#include "square.h"
+
+int main() {
+    return square(3);
+}
+\end{minted}
+
+\switchcolumn
+
+We write a function declaration inside the \mintinline{c++}|square.h| header file. This file is included into \mintinline{c++}|square.cpp| and \mintinline{c++}|main.cpp| which are both source files. \mintinline{c++}|#include| directives are preprocessed before the program's compilation and are used to include a file content into an other file. Thus, the function declaration is available in \mintinline{c++}|square.cpp| and \mintinline{c++}|main.cpp|. 
+
+However, since we call the function inside \mintinline{c++}|main.cpp| the compiler has to figure out the function's definition location, which is of course located inside \mintinline{c++}|square.cpp|. As said earlier the definition must be available in at least one translation unit.
+
+\end{paracol}

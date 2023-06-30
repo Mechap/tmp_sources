@@ -1,0 +1,127 @@
+\section*{Compile time evaluation and Constant Expressions}
+
+Compile time evaluation is the compiler ability to execute a piece of code at compile time when it would normally be compiled to machine code and then be executed at runtime. Such operations are possible only if the values involved are constant expressions.  \\
+
+Thus, constant expressions provide the ability to write compile-time programs that analyze, transform and use compile-time data. However, whilst template metaprogramming is considered as actual metaprogramming because it allows us to make the compiler generate temporary source code, which is merged with the rest of the source code and then recompiled, compile time evaluation is not by definition a metaprogramming technique ; it just appears that metaprogramming occurs at compile time in C++. \\
+
+Before the release of C++11, constant expressions could only be created through static constant member variables and enumeration types. \\
+
+According to the current specification :
+\begin{itemize}
+    \item[(i)] If a constant static data member is of integral or enumeration type, its declaration in the class definition can specify a brace-or-equal-initializer in which every initializer-clause that is an assignment-expression is a constant expression.
+
+    \vspace{10pt}
+
+    \item[(ii)] The identifiers in an enumerator-list are declared as constant, and can appear whether constant expressions are usually required.
+\end{itemize}
+
+\newpage
+
+\begin{paracol}{2}
+\begin{minted}{c++}
+struct X {
+    static const int x = 0;
+    enum { y = 1 };
+};
+\end{minted}
+
+\switchcolumn
+
+In the example above, \mintinline{c++}|x| and \mintinline{c++}|y| are constant expressions, because x is a static constant member variable, and y is an identifier in an enumerator-list. 
+\end{paracol}
+
+\hrulefill
+
+\begin{paracol}{2}
+
+\vspace{30pt}
+
+The important part is that template arguments have to be converted constant expressions. 
+\vspace{10pt}
+
+The reasons behind this requirement are related to the inherent nature of templates which will be explained in the dedicated section.
+
+\switchcolumn
+
+\begin{minted}{c++}
+template <int X>
+struct integral_constant {...};
+
+integral_constant<5> a; // correct
+
+int x = 5;
+integral_constant<x> b; // incorrect
+
+const int y = 5
+integral_constant<y> b; // correct
+\end{minted}
+\end{paracol}
+
+Because of constant expressions being compile time data, we can define a more optimized version of the factorial function that is executed at compile time :
+
+\begin{minted}{c++}
+template<int X>
+struct factorial {
+    static const int value = X * factorial<X - 1>::value;
+};
+
+template <>
+struct factorial<0> {
+    static const int value = 1;
+};
+\end{minted}
+
+Therefore, we define a template struct with a single non-type template parameter integer called \mintinline{c++}|X| which has to be a constant expression, i.e., a value that is known at compile time so that the compiler can instantiate the struct at compile time. \\
+Then, we define a static constant member variable called value which is equal to \mintinline{c++}|X * factorial<X-1>::value|, which will again be multiplied by \mintinline{c++}|factorial<X-2>::value|, and so on until \mintinline{c++}|X == 0|. \\
+Since \mintinline{c++}|value| is a static member variable, we can access it without instantiating the struct, since it is allocated at the beginning of a program.\footnote{However, the template has to be instantiated in order to access value.} \\
+
+If you try to use this new more optimized version of factorial with an input value like 5.
+\begin{minted}{c++}
+int a = factorial<5>::value;
+\end{minted}
+
+You will see that the compiler will generate the following machine code:
+\begin{minted}{asm}
+a:
+    .long 120
+\end{minted}
+
+As you can see, it has computed \mintinline{c++}|factorial<5>::value| on its own and has directly put the final result as the value of a. Hence, when the program will be executed at runtime, the processor will not have to compute the factorial of 5 since the computation has already been executed at compile time.
+
+%\textcolor{black}{\rule{16cm}{0.2mm}}
+\vspace{10pt}
+\hrule
+
+\begin{paracol}{2}
+\vspace{10pt}
+
+In C++11, the ISO C++ committee, which is also referred as WG21, introduced the \mintinline{c++}|constexpr| specifier, which allows you to specify that the following code can be evaluated at compile time. Thus, we can write compile time code using familiar syntax.
+
+\switchcolumn
+
+\begin{minted}{c++}
+constexpr int factorial(int x) {
+    if (x == 0) {
+        return 1;
+    }
+    return x * factorial(x - 1);
+}
+\end{minted}
+\end{paracol}
+
+However, the function will be evaluated at compile time if and only if the input integer value x is a constant expression. If it is not, then the compiler will treat this function as a usual runtime function. \\
+
+Again, it's possible to require the parameter to be a constant expression by using non-type template parameters:
+
+\begin{minted}{c++}
+template <int x>
+constexpr int factorial() {
+    if constexpr (x == 0) {
+        return 1;
+    }
+    return x * factorial<x - 1>();
+}
+\end{minted}
+
+Thus, we are now sure that this code will be evaluated at compile time. C++20 has also introduced immediate functions, i.e., functions that have to be evaluated at compile time unlike constexpr functions that can be evaluated at compile time. In order to define an immediate function, you have to use the consteval specifier.
+

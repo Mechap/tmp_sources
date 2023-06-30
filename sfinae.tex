@@ -1,0 +1,198 @@
+\section*{Type constraints and SFINAE}
+
+The standard library provides a utility class called \mintinline{c++}|enable_if| and is defined as:
+
+\begin{paracol}{2}
+\begin{minted}{c++}
+template <bool C, typename T>
+struct enable_if {};
+
+template <typename T>
+struct enable_if<true, T> {
+    using type = T;
+};
+\end{minted}
+\footnote{The using specifier is used to declare types. Such types are often referred as aliases.}
+
+\switchcolumn
+
+\vspace{20pt}
+They are two template definitions for \mintinline{c++}{enable_if}, one that is defined by the primary template and that contains nothing and the other one that is defined by the partial specialization and that contains a member alias to T named type.
+
+\end{paracol}
+
+\vspace{10pt}
+\hrule
+\vspace{10pt}
+
+As said previously, when a template is used in a context that requires a template instantiation, it is necessary to determine whether the instantiation is to be generated using the primary template definition or using the partial template specialization. This is done by matching the given template arguments with the template argument list of the partial specialization.
+
+\vspace{10pt}
+
+For instance :
+\begin{minted}{c++}
+using type1 = enable_if<true, int>::type;
+using type2 = enable_if<false, float>::type;
+\end{minted}
+
+In the example above, type1 is equal to int because the partial specialization is considered and used. Again, this partial specialization is chosen by the compiler because \mintinline{c++}|C| is true. However, type2 is raising a compiler error because there is no existing member alias named type in the primary template definition. Again, the primary template definition is chosen by the compiler becaue \mintinline{c++}|C| is false.
+
+%\textcolor{black}{\rule{16cm}{0.2mm}}
+
+Thus, \mintinline{c++}|enable_if| allows us to constrain place-holder types to a certain set or category of types. For instance, in order to write a factorial function that only accepts arithmetic types, we can use \mintinline{c++}|enable_if| to constrain the type:
+
+\begin{minted}{c++}
+template <typename T>
+std::enable_if_t<
+    std::is_arithmetic_v<T>, 
+    T
+> factorial(T t) { ... }
+\end{minted}
+
+If we try to call this function with the value 5, then the compiler will deduce 5 as an int value and T will be subsituted to int. Then, the function's return type will be evaluated. \mintinline{c++}|is_arithmetic_v| is a STL utility which is true if T is an arithmetic type, i.e., in our case whether \mintinline{c++}|is_arithmetic_v| is true. \\
+
+With regard to \mintinline{c++}|enable_if_t|, it is defined only if the first template parameter argument is true (\mintinline{c++}|enable_if_t| is an alias to \mintinline{c++}|enable_if<T>::type|), i.e., in our case whether \mintinline{c++}|is_arithmetic_v| is true. If it appears to be false, then it will raise a compiler error because there are no existing aliases named type inside the primary template definition of \mintinline{c++}|enable_if| and as a consequence \mintinline{c++}|enable_if_t| is ill-formed.
+
+\begin{paracol}{2}
+Since then, C++20 has introduced the concepts feature which allow us to put constraints on type more easily without relying on SFINAE.
+
+\switchcolumn
+
+\begin{minted}{c++}
+template <typename T>
+    requires std::is_arithmetic_v<T>
+T factorial(T t) { ... }
+\end{minted}
+\end{paracol}
+
+\section*{Evaluating expressions' validity}
+
+In C++, we consider that if an expression is valid then its type is valid as well. This property is used along \mintinline{c++}|std::void_t|.
+
+\begin{paracol}{2}
+\vspace{10pt}
+\begin{minted}{c++}
+template <typename ...>
+using void_t = void;
+\end{minted}
+
+\switchcolumn
+
+\mintinline{c++}|void_t| is a an alias to void as long as the types passed as template arguments are valid. Thus, we can use \mintinline{c++}|void_t| and SFINAE to evaluate whether an expression is valid and particularly to constrain types. For instance, one can write a function that has a certain member type alias defined as the following:
+\end{paracol}
+
+\begin{minted}{c++}
+struct X {
+    using memeber_type = int;
+};
+
+template <typename T, typename = std::void_t<>>
+inline constexpr bool has_member_type = false;
+
+template <typename T>
+inline constexpr bool has_member_type<
+    T,
+    std::void_t<decltype(T::member_type)>
+> = true;
+\end{minted}
+
+In the example above, there is a default anonymous template parameter to void in the primary template definition. In the partial specialization, the second template parameter is only valid if and only if \mintinline{c++}|decltype(T::member_type)| is valid\footnote{where decltype returns the type of an expression}. As for any template partial specializations, it is only considered if the second template parameter appears to be valid. Otherwise, substitution failure occurs and the compiler uses the primary template definition. \\
+
+Thus:
+\begin{minted}{c++}
+static_assert(has_member_type<int>);
+static_assert(has_member_type<X>);
+\end{minted}
+
+The first assertion will fail since int doesn't have a member type alias named \mintinline{c++}|member_type| and as a consequence the template partial specialization is not considered and the compiler has to instantiate the primary template definition that is always equal to false. In the other case, the second assertion will not fail since \mintinline{c++}|X| has a member type alias named \mintinline{C++}|member_type| and as a consequence the partial specialization which is equal to true is considered and instantiated. \\
+
+You may be wondering at this point how you can check whether there exist non-alias member names and especially non static member names. In order to do that, we need a function called \mintinline{c++}|declval|. Here is its implementation in libstc++:
+
+\begin{paracol}{2}
+\begin{minted}{c++}
+template <typename T, typename = U&&>
+U declval_impl(int);
+
+template <typename T>
+T declval_impl(float);
+
+template <typename T>
+auto declval() noexcept -> 
+    decltype(declval_impl<T>(0));
+\end{minted}
+
+\switchcolumn
+
+\vspace{10pt}
+
+In a nutshell, \mintinline{c++}|declval| is an undefined function whose return type is a reference. Indeed, references have the ability to access non static member names without any instantiations. 
+\vspace{10pt}
+
+However, since \mintinline{c++}|declval| is not defined, meaning that it doesn't own a definition, it can only be used inside unevaluated contexts.
+\end{paracol}
+
+According to the specification:
+\begin{itemize}
+    \item[(1)] In some contexts, unevaluated operands appear. 
+    \item[(2)] An unevaluated operand is not evaluated.
+\end{itemize}
+
+Unevaluated contexts only require functions' signature to be well-formed. Thus, we can combine \mintinline{c++}|void_t| and \mintinline{c++}|declval| to detect whether a certain non-static member name exists in a certain type. \\
+
+For instance:
+\begin{minted}{c++}
+struct A {
+    int variable;
+};
+
+template <typename T, typename = std::void_t<>>
+inline constexpr bool has_variable_member = false;
+
+template <typename T>
+inline constexpr bool has_variable_member<
+    T, 
+    std::void_t<decltype(std::declval<T>().variable)>
+> = true
+\end{minted}
+
+In the example above, \mintinline{c++}|has_variable_member| is a boolean templated variable whose primary template definition is always false. We also define a template partial specialization that is equal to true and is considered by the compiler if and only if
+\mintinline{c++}|decltype(std::declval<T>().variable)| is a valid type, i.e., if \mintinline{c++}|std::declval<T>().variable()| is a valid expression. \\
+
+Likewise, for non static member function:
+\begin{minted}{c++}
+struct A {
+    void function() {...}
+};
+
+template <typename T, typename = std::void_t<>>
+inline constexpr bool has_member_function = false;
+
+template <typename T>
+inline constexpr bool has_member_function<
+    T,
+    std::void_t<decltype(std::declval<T>().function())>
+> = true;
+\end{minted}
+
+or
+
+\begin{minted}{c++}
+template <typename T>
+inline constexpr bool has_member_function<
+    T,
+    std::void_t<decltype([](T t) {
+        t.function();
+    } (std::declval<T>())>
+> = true;
+\end{minted}
+
+I have taken the liberty of providing an alternative partial specialization to detect non-static member functions using unevaluated lambdas which, as the name would suggest, is the ability to use lambdas in unevaluated contexts such as \mintinline{c++}|decltype|. It is sometimes useful with more complex expressions. \\
+
+Please note that we can write a much simpler version of this code using C++20 concepts and requires expressions.
+A concept is a template that introduces constraints on its own template arguments.
+\begin{minted}{c++}
+template <typename T>
+concept HasFunctionMember = requires(T t) {
+    { t.function(); }
+};
+\end{minted}

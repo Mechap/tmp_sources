@@ -1,0 +1,149 @@
+\section*{Type deduction}
+
+C++98 had a single set of rules for type deduction: the ones for function templates. C++11 modified that ruleset a bit and adds two more, one for \mintinline{c++}|decltype| and one for \mintinline{c++}|auto|. C++14 then extends the usage contexts in which \mintinline{c++}|auto| and \mintinline{c++}|decltype| may be employe| may be employed. \\
+
+One can think of a template function as looking like this :
+
+\begin{minted}{c++}
+template <typename T>
+void f(ParamType param);
+
+f(expr);
+\end{minted}
+
+During compilation, compilers use \textit{expr} to deduce two types: one for \textit{T}, and one for \textit{ParamType}. These types are frequently different, because \textit{ParamType} often contains adornments, e.g, const or reference qualifers. \\
+
+It's natural to expect the type deduced for \textit{T} is the same as the type of the argument passed to the function, i.e., that \textit{T} is the type of \textit{expr}. The type deduced for \textit{T} is dependent not only on the type of \textit{expr}, but also on the form of \textit{ParamType}. \\
+
+They are three cases :
+
+\begin{itemize}
+    \item[(i)] \textit{ParamType} is a pointer or reference type, but not a forwarding reference (forwarding refernces will be explained in a dedicated section).
+
+    \item[(ii)] \textit{ParamType} is a forwarding reference.
+    \item[(iii)] \textit{ParamType} is neither a pointer nor a reference.
+\end{itemize}
+
+%\textcolor{black}{\rule{16cm}{0.2mm}}
+\hrulefill
+
+\subsubsection*{Case 1: \textit{ParamType} is a reference or pointer, but not a forwarding reference}
+
+The easiest situation is when \textit{ParamType} is a reference or pointer, but not a forwarding reference.
+
+\begin{minted}{c++}
+template <typename T>
+void f(T &param);
+
+int x = 27;        // decltype(x) == int
+const int cx = x;  // decltype(cx) == const int
+const int &rx = x; // decltype(rx) == const int&, i.e., a reference to x as a const int
+
+f(x);  // 1
+f(cx); // 2
+f(rx); // 3
+\end{minted}
+
+In the first call, \textit{T} is deduced as \mintinline{c++}|int|, and \textit{param}'s type as \mintinline{c++}|int&|. In the second and third calls, notice that because \textit{rx} and \textit{cx} designate const values, \textit{T} is deduced to be const int, thus yielding a paramater type of \mintinline{c++}|const int&|. In the third example, note that even though \textit{rx}'s type  is a reference, \textit{T} is deduced to be a non-reference. That's because \textit{rx}'s reference-ness is ignored during type deduction. \\
+
+If we change the type of \textit{f}'s parameter from \mintinline{c++}|T&| to \mintinline{c++}|const T&|, things change a little bit. The constness of \textit{cx} and \textit{rx} is still respected but because we're now assuming that \textit{param} is a reference-to-const, there's no need for \mintinline{c++}|const| to be deduced as part of \textit{T}.
+
+\subsubsection*{Case 2: \textit{ParamType} is a forwaring reference}
+
+Things are less obvious for templates taking forwaring reference parameters\footnote{which are also called "universal references"}. Such parameters are declared like rvalue references, but they behave differently when lvalue arguments are passed in.
+
+\begin{minted}{C++}
+template <typename T>
+void f(T &&param);
+
+f(x);  // x is lvalue, so T is int& and param's type is also int&
+f(cx); // x is lvalue, so T is const int& and param's type is also const int&
+f(rx); // x is lvalue, so T is const int& and param's type is also const int&
+f(27); // x is rvalue, so T is int and param's type is int&&
+\end{minted}
+
+\begin{itemize}
+	\item If \textit{expr}  is an lvalue, both \textit{T} and \textit{param's type} are lvalue references.
+
+	\item If \textit{expr} is an rvalue, \textbf{Case 1} is applied.
+\end{itemize}
+
+This logic can be explained with one restriction introduced with references :
+\begin{displayquote}
+	\textit{A reference can not point to an other reference.}
+\end{displayquote}
+
+However, it is sometimes possible to generate similar references :
+\begin{minted}{c++}
+using int_ref = int&;
+
+int_ref&& a; // decltype(a) -> int_ref& && ?
+\end{minted}
+
+In such situations, the specification applies the \textit{reference collapsing rule} :
+\begin{itemize}
+    \item \mintinline{C++}|&| + \mintinline{C++}|&| = \mintinline{C++}|&|
+    \item \mintinline{C++}|&&| + \mintinline{C++}|&| = \mintinline{C++}|&|
+    \item \mintinline{C++}|&&| + \mintinline{C++}|&&| = \mintinline{C++}|&&|
+\end{itemize}
+
+Thus :
+\begin{minted}{c++}
+static_assert(std::is_same_v<decltype(a), int&>);
+\end{minted}
+
+You can already see that we are in a similar situation with forwarding references.
+\begin{minted}{c++}
+f(a) // compiler instantiates
+     // f<int&>(int && &) which translates to
+     // f<int&>(int &) thanks to reference collapsing
+
+f(static_cast<int&&>(a)); // compiler instantiates
+                          // f<int&&>(int && &&) which translates to
+                          // f<int&&>(int &&) 
+\end{minted}
+
+This behaviour is refered in the specification as the \textit{reference collapsing}
+where the compiler is required to follow the above rules.
+Please note, that such behaviour can appear within syntactical macros.
+
+\begin{minted}{c++}
+#define lvalue int&
+#define rvalue int&&
+
+lvalue &a;      // decltype(a) → int& + & → int&
+lvalue &&b;     // decltype(b) → int& + && → int&
+
+rvalue &c;      // decltype(c) → int && + & → int&
+rvalue &d;      // decltype(d) → int && + && → int&&
+\end{minted}
+
+\subsubsection*{Case 3: \textit{ParamType} is neither a pointer nor a reference}
+
+When \mintinline{C++}|ParamType| is neither a pointer nor a reference, we are dealing with pass-by-value.
+
+\begin{minted}{c++}
+template <typename T>
+void f(T param); // param is now passed by value
+\end{minted}
+
+That means, that \mintinline{c++}|param| will be a copy of whatever is passed in, i.e., a completely new object.
+The fact that \mintinline{c++}|param| will be a new object motivates the rules that govern how T is reduced from \mintinline{c++}|expr|
+
+\begin{itemize}
+    \item[(i)] As before, if \mintinline{c++}|expr|'s type is a reference, ignore the reference part.
+    \item[(ii)] If, after ignoring \mintinline{c++}|expr|'s reference-ness, \mintinline{c++}|expr| is \mintinline{c++}|const| or \mintinline{c++}|volatile|, ignore that too.
+\end{itemize}
+
+Therefore :
+\begin{minted}{c++}
+int x = 27;         // as before
+const int cx = x;   // as before
+const int &rx = x;  // as before
+
+f(x);               // T's and param's types are both int
+f(cx);              // T's and param's types are again both int
+f(rx);              // T's and param's types are still both int
+\end{minted}
+
+Please note that even though \mintinline{c++}|cx| and \mintinline{c++}|rx| represent \mintinline{c++}|const| values, \mintinline{c++}|param|'s is not \mintinline{c++}|const|, since it is a completely independent object.

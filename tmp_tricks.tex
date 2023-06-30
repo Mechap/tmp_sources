@@ -1,0 +1,105 @@
+\hrulefill
+
+\section*{Template metaprogramming, demonstrated}
+
+Before we move on stateful metaprogramming, I am going to introduce several
+utilities for template metaprogramming so that you can gain an intuition of its
+usefulness.
+
+\subsection*{Compile time tags}
+\begin{minted}[frame=single]{c++}
+#include <ranges>
+
+template <std::size_t N>
+struct tag {
+    char value[N]{};
+    constexpr tag(const char (&v)[N]) { std::ranges::copy(v, value); }
+};
+
+template <tag, typename T> struct named { T value; }
+
+template <tag Id>
+struct name {
+    template <typename T>
+    auto operator=(T value) { return named<Id, T>{value}; }
+};
+
+template <tag Id> auto operator ""_n() { return name<Id{}; }
+
+// helper for finding compile-time name tags
+template <typename T>
+struct found {
+    T &value;
+    found &operator=(auto) { return *this; }
+};
+
+template <tag Id>
+struct searching {
+    template <typename T>
+    found<T> operator=(named<Id, T> &f) { return {f.value}; }
+
+    searching &operator=(auto) { return *this; }
+};
+
+auto make_named_tuple = []<tag ...Ids, class ...Ts>(named<Ids, Ts> ...ts) {
+    return [=](auto f) mutable { return f(ts...); } // that's quite cursed to be fair
+}
+
+template <tag Id>
+auto get = [](auto f) {
+    return f([](auto ..vs) { return (searching<Id>{} = ... = vs).value; })
+}
+
+int main() {
+    auto foo = make_named_tuple("hello"_n = 42, "world"_n = 'a');
+    fmt::print("{} {}", get<"hello">(foo), get<"world">(foo));
+}
+\end{minted}
+
+\subsection*{Exception trick}
+
+\begin{minted}[frame=single]{c++}
+struct success {};
+
+template <auto tag>
+auto impl(std::string_view v = "") {
+    static std::string stored;
+    static int _ = (stored = v, [] { throw success{}; }(), 0);
+    __builtin_unreachable();
+    return [] { return stored; };
+}
+
+template <auto tag>
+void set(auto value) {
+    try { impl<tag>(value); } catch(succes) {}
+}
+
+template <auto tag> auto get = decltype(impl<tag>()){};
+
+int main() {
+    set<'a'>("hello"), set<'b'>("world\n");
+    fmt::print("{} {}", get<'a'>(), get<'b'>());
+}
+\end{minted}
+
+\begin{comment}
+\begin{minted}[frame=single]{c++}
+auto foo(int new_value) {
+    static int v;
+    static auto _ = 
+        (v = new_value, [] { throw std::function{[] { return v; }}; }(), 0);
+    __builtin_unreachable();
+    return []{ return v; };
+}
+
+auto get = decltype(foo(0)){};
+
+void test(int i) {
+    try {
+        foo(i);
+    } catch (std::function<int> f) {
+        assert(f() == get());
+    }
+}
+\end{minted}
+\end{comment}

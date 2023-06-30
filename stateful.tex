@@ -1,0 +1,484 @@
+
+\section*{Stateful Metaprogramming}
+
+Template metaprogramming is a pure functionnal language, meaning the outputs of functions depend only on their inputs and calling function never changes anything, only creates output. This lack of side effects significantly reduces the chance that errors are made, to the point where code that compiles usually does what it is supposed to do. Today, we are going to demonstrate that all these statements are false. However, please note that all the code used in the following section will be mostly compatible with GCC.
+
+%\textcolor{black}{\rule{16cm}{0.2mm}}
+\hrulefill
+
+\section*{Friend injections}
+
+According to the specification, a friend function may be defined at its friend declaration within a class:
+\begin{itemize}
+	\item A function can be defined in a friend declaration of a class if and only if the class is a non-local class ([class.local]), 
+\end{itemize}
+
+Friend functions which are defined at their friend declarations do not introduce names and are implicitely inline 
+\footnote{allowing the definition to be present in multiple translation units without violating the One Definition rule}
+
+\begin{itemize}
+	\item If a friend declaration in a non-local class first declares a class, function, class template or function template the friend is 
+		a member of the innermost enclosing namespace.
+		The friend declaration does not by itself make the name visible to unqualified lookup or qualified lookup.
+		[Note 2: The name of the friend will be visible in its namespace if a matching declaration is provided at namespace 
+		scope (either before or after the class definition granting friendship). — end note]
+\end{itemize}
+
+Furthermore, functions defined at their friend declarations do not introduce the declared name into the enclosing namespace although they have namespace scope, meaning that a matching declaration needs to be provided at namespace scope in order to allow friend functions to be
+found without ADL lookup.
+
+\begin{minted}{c++}
+struct A {
+    friend consteval void f() {...}
+};
+
+f(); // error
+
+consteval void f();
+f(); // fine
+	\end{minted}
+
+	It is also possible according to the specification to access these functions using ADL lookup.
+	\begin{minted}{c++}
+struct A {
+    friend consteval void f(int) {...}
+};
+f(int{}); // fine
+	\end{minted}
+
+	Thus, friend injections is the technique in which we supply friend declarations in template class/struct. Hence, the function is undefined until we instantiate the struct/class template. \\
+
+	For instance:
+
+	\begin{minted}{c++}
+template <int N>
+struct A {
+    friend consteval int f() { 
+        return N; 
+    }
+};
+consteval int f();
+
+constexpr int a = f(); // f is undefined!
+
+template struct A<7>;
+constexpr int b = f(); // b == 7
+	\end{minted}
+
+	In the example above, \mintinline{c++}|a| raises a compiler error because \mintinline{c++}|f()| lacks a definition. Likewise, \mintinline{c++}|b| does not raise a compiler error because \mintinline{c++}|A| has been instantiated. Thus, the code is well-formed.
+
+	Alternatively, we can use ADL.
+	\begin{minted}{c++}
+template <int N>
+struct A {
+    friend consteval int f(int) { 
+        return N; 
+    }
+};
+
+constexpr int a = f(int{}); // error
+
+template struct A<7>;
+constexpr int b = f(int{}); // fine
+	\end{minted}
+
+	In this example, \mintinline{c++}|f()| is accessed using ADL, and is defined when \mintinline{c++}|A| is instantiated.
+
+	\begin{minted}{c++}
+template <int X>
+struct flag {
+    friend consteval int f(flag<X>);
+};
+
+template <int X, int N>
+struct injecter {
+    friend consteval int f(flag<X>) { 
+        return N; 
+    }
+};
+
+template struct injecter<0, 1>;
+constexpr int a = f(flag<0>{}); // a == 0
+
+template struct injecter<1, 2>;
+constexpr int b = f(flag<1>{}); // b == 1
+	\end{minted}
+	
+	In the example above, \mintinline{c++}|f()| is a friend function declared inside the template struct \mintinline{c++}|flag| and takes a \mintinline{c++}|flag| parameter, that is used to access the \mintinline{c++}|f()|'s definition using ADL. Its definition is in addition provided inside the template struct \mintinline{c++}|injecter|. Thus, the compiler will call a certain definition of \mintinline{c++}|f()| depending on a certain value \mintinline{c++}|X|.  
+	
+	In other words, when \mintinline{c++}|injecter| is instantiated for a certain value \mintinline{c++}|X|, \mintinline{c++}|f()| returns a \mintinline{c++}|N| value according to the same value \mintinline{c++}|X|.
+
+	\begin{minted}{c++}
+template <int X>
+struct flag {
+    friend consteval auto f(flag<X>);
+};
+
+template <int X>
+struct injecter {
+    friend consteval auto f(flag<X>) { return X; }
+};
+
+template <int X = 0, auto = []{}>
+consteval auto inject() {
+    if constexpr (requires { f(flag<X>{}); }) {
+        return inject<X+1>();
+    } else {
+        void(injecter<X>{});
+        return f(flag<X>{});
+    }
+}
+
+static_assert(inject() == 0);
+static_assert(inject() == 1);
+static_assert(inject() == 2);
+	\end{minted}
+
+	That's it. We did an actual compile time counter by using friend injections and stateful metaprogramming. Let's dive into \mintinline{c++}|inject()|'s definition. It takes two non-type template parameters, on one hand the \mintinline{c++}|X| value that is used to instantiate \mintinline{c++}|flag/injecter| and to access \mintinline{c++}|f()| using ADL and on the other hand a lambda whose purpose will be explained
+	later. Then, a compile time \mintinline{c++}|if| statement is used in addition to a \mintinline{c++}|requires| expression to evaluate whether \mintinline{c++}|f(flag<X>{})| is defined. If it is the case we call \mintinline{c++}|inject<X + 1>()| otherwise we inject \mintinline{c++}|f()|'s definition by instantiating \mintinline{c++}|injecter| for a given value \mintinline{c++}|X|. \\
+
+	Finally, the purpose of the lambda used as a non-type template parameter in \mintinline{c++}|inject()|'s definition is to reevaluate the compile time \mintinline{c++}|if| statement every time \mintinline{c++}|inject()| is called. Otherwise, the specification says:
+	
+	\begin{itemize}
+		\item If the value of the converted condition is false, the first substatement is a discarded statement, otherwise the second substatement, if present, is a discarded statement.
+	\end{itemize}
+
+	Indeed, lambda's closure type, i.e., the actual type of the lambda, has to be unique according to the specification.
+
+	\begin{itemize}
+		\item The type of a lambda-expression (which is also the type of the closure object) is a unique, unnamed non-union class type, called the closure type.
+	\end{itemize}
+
+	Thus, every time \mintinline{c++}|inject()| is called the compiler has to generate a new template instantiation with a unique closure type allowing us to ask the compiler to evaluate the compile time \mintinline{c++}|if| statement every time \mintinline{c++}|inject()| is called, i.e., every time it is instantiated.
+
+    \begin{minted}{c++}
+    static_assert(!std::is_same_v<decltype([]{}), decltype([]{})>);
+    \end{minted}
+
+	%\textcolor{black}{\rule{16cm}{0.2mm}}
+    \hrulefill
+
+	\section*{Static reflection}
+
+	C++ provides many facilities that allow for the compile time inspection and manipulation of types and values. Template metaprogramming is one these fields that try to take advantage of these features. However, C++ still lacks som fundamental building blocks in this area. There is no way, for example, to discover an arbitrary class's name or query its member variables, or at least fundamental and standardized ways. Static reflection is this ability to examine and possibly modify the program's structure or behaviour. There is however, some ways to achieve arkane static reflection using modern C++.
+
+	\section*{Type list}
+
+	Before starting to think about how we can enumerate fields from a structure, we must define how we are going to store these informations. For simplicity purposes, we are going to use
+	a type list.
+
+	\begin{minted}{c++}
+template <typename ...Ts>
+struct type_list {
+    template <typename ...Us>
+    using append = type_list<Ts..., Us...>;
+
+    template <typename U>
+    static constexpr bool contains = (std::is_same_v<type_list<U>, type_list<Ts>> || ...);
+};
+
+template <typename ...Ts, typename ...Us>
+consteval bool operator==(type_list<Ts...>, type_list<Us...>) {
+    return sizeof...(Ts) == sizeof...(Us) && (std::is_same_v<Ts, Us> && ...);
+}
+	\end{minted}
+
+A type list is basically a struct with a template parameter pack \mintinline{c++}|Ts|, i.e., a set of possibly heterogenous types. We can add new types using the \mintinline{c++}|append| type alias and check whether the type list contains a specific type using the \mintinline{c++}|contains| template variable but more importantly we can compare two type lists by comparing their respective elements. Manipulating parameter packs can become quite cumbersome but fortunately, C++17 has introduced fold expressions. \\
+	
+A fold expression can be thought as a folding operation over a parameter pack. 
+
+Thus, the expression \mintinline{c++}|(std::is_same_v<Ts, Us> && ...)| is true if all the types in \mintinline{c++}|Ts| are the same as in \mintinline{c++}|Us|. This expression expands into \mintinline{c++}|(std::is_same_v<T1, U1> && (std::is_same_v<T1, U2> && ...))|. \\
+
+	Likewise, we can check whether our type list contains a certain type using a fold expression \\ \mintinline{c++}|(std::is_same_v<type_list<U>, type_list<Ts> && ...)|, which will expand into \\ \mintinline{c++}|(std::is_same_v<type_list<U>, type_list<T1> && (std::is_same_v<type_list<U>, type_list<T2> && ...>)>)|. \\
+
+	Thus, we have a basic api for manipulating list of types:
+	\begin{minted}{c++}
+using t1 = type_list<int, float, double>;
+static_assert(t1{} == type_list<int, float, double>{});
+
+using t2 = type_list<int, float>
+static_assert(t1{} == t2::append<double>{});
+
+static_assert(t1::contains<double>);
+static_assert(t2::contains<double>); // fails
+	\end{minted}
+
+	%\textcolor{black}{\rule{16cm}{0.2mm}}
+    \hrulefill
+
+	\section*{The underlying type}
+
+	In order to get fields' types from a structure, we need a utility class that we are going to call \mintinline{c++}|arg_t| and which contains a templated conversion operator:
+	\begin{minted}{c++}
+struct arg_t {
+    template <typename U>
+    consteval operator U() const noexcept;
+};
+	\end{minted}
+
+	Thus, \mintinline{c++}|arg_t| can be converted to any types.
+	\begin{minted}{c++}
+int a = arg_t{};
+float b = arg_t{};
+std::string c = arg_t{};
+	\end{minted}
+
+	Now, here is the interesting part:
+	\begin{minted}{c++}
+struct A {
+    int n;
+    float i;
+};
+
+A a{arg_t{}, arg_t{}}; 
+// A a = {static_cast<int>(arg_t{}.operator int<int>()), 
+//        static_cast<float>(arg_t{}.operator float<float>())}
+	\end{minted}
+
+	As you can see, \mintinline{c++}|U| is converted to the type expected to initialize \mintinline{c++}|A|. It is now a matter of storing the type deduced somewhere. Using stateful metaprogramming it becomes:
+
+	\begin{minted}{c++}
+template <typename T, std::size_t N>
+struct member {
+    friend consteval auto member_type(member<T, N>);
+};
+
+template <typename T, std::size_t N, typename U>
+struct set_member_type {
+    friend consteval auto member_type(member<T, N>) {
+        return U{};
+    }
+};
+
+template <typename T, std::size_t N>
+struct arg_t {
+    template <typename U>
+    consteval operator U() const noexcept(set_member_type<T, N, U>{});
+};
+	\end{minted}
+
+	We have a templated structure \mintinline{c++}|member| that takes two template parameters : \mintinline{c++}|T|, the type of the structure we want to inspect and \mintinline{c++}|N|, the argument index. \mintinline{c++}|member| is also responsible for declaring the friend function \mintinline{c++}|member_type()|, which is accessible using its parameter thanks to ADL. \mintinline{c++}|member_type()|'s definition is located inside the templated struct \mintinline{c++}|set_member_type|, which as its name would suggest is responsible for injecting \mintinline{c++}|member_type()|'s definition whose responsability is to return the field's type \mintinline{c++}|U| for a structure \mintinline{c++}|T| at an index \mintinline{c++}|N|. \\
+
+	Finally, the \mintinline{c++}|arg_t|'s conversion operator has a \mintinline{c++}|noexcept| operator that instantiates \mintinline{c++}|set_member_type| with \mintinline{c++}|T|, \mintinline{c++}|N|, and \mintinline{c++}|U|. Thus, using this conversion operator will instantiate \mintinline{c++}|set_member_type| which will inject \mintinline{c++}|member_type()|'s definition.
+
+	\begin{minted}{c++}
+static_assert(requires { A{arg_t<A, 0>{}, arg_t<A, 1>{}}; });
+
+static_assert(std::is_same_v<decltype(member_type(member<T, 0>{})), int>);
+static_assert(std::is_same_v<decltype(member_type(member<T, 1>{})), float>);
+	\end{minted}
+
+	%\textcolor{black}{\rule{16cm}{0.2mm}}
+    \hrulefill
+
+	\section*{Borrow Checker}
+
+	Now, we are getting into crazy stuff. The following content is based on my own research on stateful metaprogramming possibilities in standard C++. Please note that a lot of compilers segfault or complain about these kind of tricks and as a consequence in addition to the code showed here, I will put along a compatible version used to demonstrate in practice the consistency of the so-called piece of code. However, as I said in the previous section our implementation will only be compatible with GCC. Clang and Visual C++, aka msvc, are not really standard compliant when it comes to stateful metaprogramming. GCC has also some bugs when it comes to NTTP lambdas in template context, but these bugs can be easily solved using tricks which will be explained in due course. That being said, let's define what a "borrow checker" is. \\
+
+	Type systems are useful not only for making our programs more secure and reliable, but also for helping compiler generate more efficient code by simplifying important programs analyses. Thus we can guarantee memory safety by using a borrow checker, i.e., a compile time program that checks the data ownership rules preventing as a consequence data races and segmentation faults.
+	\\
+
+	In this section, I will expose an implementation of a borrow checker in C++ using stateful metaprogramming. We shall enumerate the set of rules required by the borrow checker.
+
+	\begin{itemize}
+		\item Every variables owns a "mutability region".
+		\item Every variables must be modified through out this region.
+	\end{itemize}
+
+	%\textcolor{black}{\rule{16cm}{0.2mm}}
+    \hrulefill
+
+	Firstly, we need to declare a friend function inside a template struct in order to capture and retrieve a compile time state. We also define a function which checks if such friend function has been injected in the global namespace. Again, we use the lambda's closure type trick to force the compiler to reevaluate a constexpr function.
+
+	\begin{minted}{c++}
+template <typename T>
+struct tag {
+    friend consteval int flag(tag<T>);
+};
+
+template <typename T>
+struct set {
+    friend consteval int flag(tag<T>) { return {}; }
+};
+
+template <typename T, auto = []{}>
+consteval bool is_set() {
+    if constexpr (requires { flag(tag<T>{}); }) {
+        return true;
+    } else {
+        return false;
+    }
+}
+	\end{minted}
+
+	Next, we create wrapper class that encapsulates a resource and associates it with a region. We also define two getter methods which give for the first one a mutable access to the said resource and the other one a read-only access to it.
+	\\
+
+	However, the mutable getter has a requires-constraint depending on the value of \mintinline{c++}|is_set<U>()|.
+
+	\begin{minted}{c++}
+template <typename T, typename Region>
+class wrapper {
+    T x;
+public:
+    template <typename ...Args>
+    wrapper(Args &&... args) : x{std::forward<Args>(args)...} {}
+
+    wrapper(const wrapper &) = delete;
+    wrapper &operator=(const wrapper &) = delete;
+
+    wrapper(wrapper &&) = delete;
+    wrapper &operator=(wrapper &&) = delete;
+
+    template <auto = []> // used to enforce a new template instantiation for every calls
+        requires (!is_set<Region>())
+    T &get()  { return x; }
+
+    const T &get() const { return x; }
+};
+\end{minted}
+
+Then, we declare the \mintinline{c++}|region_base| class which has to be inherited by all the regions defined and used to instantiate our wrapper class.
+
+\begin{minted}{c++}
+template <typename Region>
+struct region_base {
+    template <typename T>
+    using wrapper = ::wrapper<T, Region>;
+
+    template <typename T, typename ...Args>
+    static auto make(Args &&... args) {
+        return wrapper<T>{std::forward<Args>(args)...};
+    }
+};
+\end{minted}
+
+Finally, we define two macros which creates named regions inheriting from our \mintinline{c++}|region_base| class and inject the friend function's definition in the global namespace. \\
+
+\begin{minted}{c++}
+#degine begin_mutable_region(r) struct r : region_base<r> {};
+#define end_mutable_region(r) void(set<r>{});
+\end{minted}
+
+We now have everything required to test our borrow checker.
+\begin{minted}{c++}
+int main() {
+    begin_mutable_region(r);
+
+    auto x = r::make<int>(1);
+    auto v = r::make<std::vector<int>>();
+
+    x.get() = 42;
+    v.get().emplace_back(42);
+
+    end_mutable_region(r);
+
+    x.get() = 0; // error
+    v.get().clear(); // error
+}
+\end{minted}
+
+\hrulefill
+
+\begin{comment}
+It appears as though we could detect scope by injecting a templated friend function
+statefully in the constructor or some random function. Because each scope should
+be unique, we shall rely on the templated lambda trick.
+
+\begin{minted}{c++}
+template <typename Region>
+struct region_base2 {
+    ~region_base() noexcept {
+        void(set<Region>{});
+    }
+    ...
+};
+\end{minted}
+
+Therefore,
+
+\begin{minted}[frame=single]{c++}
+template<typename = decltype([]{})>
+struct check_scope;
+
+template <typename U = decltype([]{})>
+struct Scope {
+    ~Scope() noexcept {
+        void(check_scope<U>{});
+    }
+};
+\end{minted}
+
+We now need to change our \mintinline{c++}|wrapper| class accordingly to
+our custom scope.
+
+Unfortunately, I have not found a way to detect scope so that we would not need to define manually the beginning and the end of the borrowing regions. It would hypothetically require the ability to define a template destructor in our \mintinline{c++}|region_base| class such that we could inject the friend function's definition.
+
+\begin{minted}[frame=single]{c++}
+// TODO: hypothetic implementation
+\end{minted}
+
+\begin{minted}{c++}
+int main() {
+    {
+        auto x = r::make<int>(1);
+        auto v = r::make<std::vector<int>>();
+        x.get() = 42;
+        v.get().emplace_back(42);
+    }
+
+    x.get() = 0; // error
+    v.get().clear(); // error
+}
+\end{minted}
+\end{comment}
+
+\subsection*{Thoughts}
+
+By constructing such paradigmes, it becomes less of a dream to think about 
+writing a whole turing-complete language using only stateful metaprogramming. 
+Indeed, while we thought that the comitee would want to make this ill-formed, 
+it recently appeared that new features from the language already provide the 
+required tools to construct non-constant expressions. 
+
+From, this point of view, I believe that we should investigate more 
+in the nature of such constructions by discovering new C++'s capabilities.
+
+\vfill
+
+\begin{center}
+    \mplibforcehmode
+    \mplibtextextlabel{enable}
+    \begin{mplibcode}
+        input colorbrewer-rgb;
+        beginfig(0);
+            path t[], h;
+            numeric r; r = -30;
+            t0 = (for i=0 upto 2: up scaled 21 rotated 120i -- endfor cycle) rotated r;
+            h  = (for i=0 upto 5: up scaled 34 rotated 60i -- endfor cycle) rotated r;
+            t1 = subpath (0, 1) of t0 -- point 1 of h -- cycle;
+            t2 = subpath (1, 2) of t0 -- point 3 of h -- cycle;
+            t3 = subpath (2, 3) of t0 -- point 5 of h -- cycle;
+            t4 = subpath (0, 1) of h -- point 0 of t0 -- cycle;
+            t5 = subpath (1, 2) of h -- point 1 of t0 -- cycle;
+            t6 = subpath (2, 3) of h -- point 1 of t0 -- cycle;
+            t7 = subpath (3, 4) of h -- point 2 of t0 -- cycle;
+            t8 = subpath (4, 5) of h -- point 2 of t0 -- cycle;
+            t9 = subpath (5, 6) of h -- point 0 of t0 -- cycle;
+            fill t0 withcolor Blues 7 2;
+            fill t1 withcolor Blues 7 1;
+            fill t2 withcolor Blues 7 3;
+            fill t3 withcolor Blues 7 3;
+            fill t4 withcolor Blues 7 1;
+            fill t5 withcolor Blues 7 1;
+            fill t6 withcolor Blues 7 2;
+            fill t7 withcolor Blues 7 5;
+            fill t8 withcolor Blues 7 5;
+            fill t9 withcolor Blues 7 2;
+            forsuffixes @=0, 4, 5, 6, 7, 8, 9: draw t@; endfor
+
+            currentpicture := currentpicture scaled 0.6;
+        endfig;
+    \end{mplibcode}
+\end{center}
+
